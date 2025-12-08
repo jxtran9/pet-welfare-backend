@@ -48,10 +48,14 @@ def list_animals(db: Session = Depends(get_db)):
 # ---------- CRUD: Create animal ----------
 
 class AnimalCreate(BaseModel):
+    AnimalID: int
     OrgID: int
     Species: str
     Sex: str
     AgeMonths: int
+    Microchip: str | None = None
+    Notes: str | None = None
+
 
 
 @app.post("/add-animal")
@@ -59,24 +63,29 @@ def add_animal(animal: AnimalCreate, db: Session = Depends(get_db)):
     """
     Simple CREATE endpoint:
     Inserts a new animal row into the Animal table.
+    AnimalID is provided by the client (must be unique and >= 1).
     """
     query = text(
         """
-        INSERT INTO Animal (OrgID, Species, Sex, AgeMonths)
-        VALUES (:org_id, :species, :sex, :age)
+        INSERT INTO Animal (AnimalID, OrgID, Species, Sex, AgeMonths, Microchip, Notes)
+        VALUES (:animal_id, :org_id, :species, :sex, :age, :microchip, :notes)
         """
     )
     db.execute(
         query,
         {
+            "animal_id": animal.AnimalID,
             "org_id": animal.OrgID,
             "species": animal.Species,
             "sex": animal.Sex,
             "age": animal.AgeMonths,
+            "microchip": animal.Microchip,
+            "notes": animal.Notes,
         },
     )
     db.commit()
     return {"status": "success"}
+
 
 
 # ---------- Complex query example ----------
