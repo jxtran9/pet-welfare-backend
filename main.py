@@ -1,4 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException
+from typing import Optional
+
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -31,8 +33,7 @@ def health_check():
 @app.get("/animals-simple")
 def list_animals(db: Session = Depends(get_db)):
     """
-    Simple example: return up to 20 animals from the Animal table.
-    Adjust column names if your schema is different.
+    Simple example: return up to 50 animals from the Animal table.
     """
     query = text(
         """
@@ -56,7 +57,6 @@ class AnimalCreate(BaseModel):
     AgeMonths: int
     Microchip: str | None = None
     Notes: str | None = None
-
 
 
 @app.post("/add-animal")
@@ -86,6 +86,7 @@ def add_animal(animal: AnimalCreate, db: Session = Depends(get_db)):
     )
     db.commit()
     return {"status": "success"}
+
 
 @app.delete("/delete-animal/{animal_id}")
 def delete_animal(animal_id: int, db: Session = Depends(get_db)):
@@ -119,13 +120,13 @@ def delete_animal(animal_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "animal_id": animal_id}
 
 
-# ---------- Complex query example ----------
+# ---------- Simple aggregate query ----------
 
 @app.get("/animal-stats")
 def animal_stats(db: Session = Depends(get_db)):
     """
     Example 'complex' query: aggregate animals by species.
-    Can be used as a demo for analytical reporting.
+    Used for the small chip summary in the UI.
     """
     query = text(
         """
@@ -135,4 +136,101 @@ def animal_stats(db: Session = Depends(get_db)):
         """
     )
     rows = db.execute(query).mappings().all()
+    return list(rows)
+
+
+# =====================================================
+#   COMPLEX QUERIES FOR UI (with dropdown filters)
+# =====================================================
+
+@app.get("/welfare-followups")
+def welfare_followups(
+    species: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """
+    Complex welfare query for the UI.
+
+    Shows animals whose welfare exam suggests they need additional attention.
+    Here we approximate 'needs follow-up' as a lower HealthScore (<= 6),
+    then join WelfareExam, Animal, and Organization.
+
+    Optional filter:
+      - species: If provided and not 'All', filters by Animal.Species.
+    """
+    base_sql = """
+        SELECT
+            A.AnimalID,
+            A.Species,
+            A.AgeMonths,
+            A.Sex,
+            Org.OrgName,
+            W.Date      AS ExamDate,
+            W.HealthScore,
+            W.Notes
+        FROM WelfareExam W
+        JOIN Animal A
+            ON W.AnimalID = A.AnimalID
+        JOIN Organization Org
+            ON W.OrgID = Org.OrgID
+        WHERE W.HealthScore IS NOT NULL
+          AND W.HealthScore <= 6
+    """
+
+    params: dict = {}
+
+    if species is not None and species != "All":
+        base_sql += " AND A.Species = :species"
+        params["species"] = species
+
+    base_sql += " ORDER BY W.Date DESC, A.AnimalID"
+
+    query = text(base_sql)
+    rows = db.execute(query, params).mappings().all()
+    return list(rows)
+
+
+@app.get("/adoption-stats")
+def adoption_stats(
+    state: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """
+    Complex adoption statistics query for the UI.
+
+    Joins Adoption, Outcome, Animal, Adopter, and Location to compute
+    adoption counts grouped by State and Species.
+
+    Optional filter:
+      - state: If provided and not 'All', restricts to that Location.State.
+    """
+    base_sql = """
+        SELECT
+            L.State,
+            A.Species,
+            COUNT(*) AS AdoptionCount
+        FROM Adoption AD
+        JOIN Outcome O
+            ON AD.OutcomeID = O.OutcomeID
+        JOIN Animal A
+            ON O.AnimalID = A.AnimalID
+        JOIN Adopter D
+            ON AD.AdopterSsn = D.Ssn
+        JOIN Location L
+            ON D.LocationID = L.LocationID
+    """
+
+    params: dict = {}
+
+    if state is not None and state != "All":
+        base_sql += " WHERE L.State = :state"
+        params["state"] = state
+
+    base_sql += """
+        GROUP BY L.State, A.Species
+        ORDER BY L.State, A.Species
+    """
+
+    query = text(base_sql)
+    rows = db.execute(query, params).mappings().all()
     return list(rows)
