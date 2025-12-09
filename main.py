@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -36,9 +36,10 @@ def list_animals(db: Session = Depends(get_db)):
     """
     query = text(
         """
-        SELECT AnimalID, OrgID, Species, Sex, AgeMonths
+        SELECT AnimalID, OrgID, Species, Sex, AgeMonths, Microchip, Notes
         FROM Animal
-        LIMIT 20;
+        ORDER BY AnimalID
+        LIMIT 50;
         """
     )
     rows = db.execute(query).mappings().all()
@@ -86,6 +87,36 @@ def add_animal(animal: AnimalCreate, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "success"}
 
+@app.delete("/delete-animal/{animal_id}")
+def delete_animal(animal_id: int, db: Session = Depends(get_db)):
+    """
+    DELETE endpoint:
+    Deletes an animal row from the Animal table by AnimalID.
+    """
+    # Check if the animal exists
+    check_query = text(
+        """
+        SELECT AnimalID
+        FROM Animal
+        WHERE AnimalID = :animal_id
+        """
+    )
+    row = db.execute(check_query, {"animal_id": animal_id}).first()
+    if not row:
+        # If not found, return 404 so UI can react
+        raise HTTPException(status_code=404, detail="Animal not found")
+
+    # Perform delete
+    delete_query = text(
+        """
+        DELETE FROM Animal
+        WHERE AnimalID = :animal_id
+        """
+    )
+    db.execute(delete_query, {"animal_id": animal_id})
+    db.commit()
+
+    return {"status": "deleted", "animal_id": animal_id}
 
 
 # ---------- Complex query example ----------
